@@ -1,13 +1,12 @@
-# Camus Segmentation
 # 🫀 Cardiac Structure Segmentation on the CAMUS Dataset
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange?logo=pytorch)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.11%2B-orange?logo=pytorch)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Dataset](https://img.shields.io/badge/Dataset-CAMUS-blueviolet)
-![Model](https://img.shields.io/badge/Architecture-UNet%2B%2B-red)
+![Model](https://img.shields.io/badge/Architecture-UNet%20ResNet34-red)
 
-Multiclass segmentation of cardiac structures in echocardiographic images using a **UNet++ with ResNet34 encoder** trained on the [CAMUS dataset](https://www.creatis.insa-lyon.fr/Challenge/camus/index.html). The model identifies three anatomical structures — **LV endocardium**, **LV myocardium**, and **left atrium** — across apical 2-chamber and 4-chamber views.
+Multiclass segmentation of cardiac structures in echocardiographic images using a **UNet with ResNet34 encoder** trained on the [CAMUS dataset](https://www.creatis.insa-lyon.fr/Challenge/camus/index.html). The model identifies three anatomical structures — **LV endocardium**, **LV myocardium**, and **left atrium** — across apical 2-chamber and 4-chamber views.
 
 ---
 
@@ -20,23 +19,25 @@ Multiclass segmentation of cardiac structures in echocardiographic images using 
 - [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Known Issues & Limitations](#known-issues--limitations)
+- [Limitations](#limitations)
 - [References](#references)
 
 ---
 
 ## Overview
 
-Accurate segmentation of cardiac structures in echocardiography is a critical step in clinical workflows — enabling the automated calculation of metrics such as **ejection fraction** and **ventricular volumes**, which are central to the diagnosis of cardiovascular disease.
+Accurate segmentation of cardiac structures in echocardiography is a critical step in clinical workflows — enabling automated calculation of metrics such as **ejection fraction** and **ventricular volumes**, which are central to the diagnosis of cardiovascular disease.
 
 This project implements a full deep learning pipeline covering:
 
-- NIfTI data loading and preprocessing (`.nii.gz` format)
-- Z-score normalisation of ultrasound intensities
-- Custom `PyTorch Dataset` for multi-view echocardiographic data
-- **5-Fold Cross-Validation** with early stopping
-- Per-class evaluation metrics: Dice, IoU, Precision, Recall, F1-score
-- Training/validation loss curves and confusion matrix visualisation
+- NIfTI data loading and preprocessing (`.nii.gz` format) via SimpleITK
+- Bicubic resizing and min-max normalisation of ultrasound intensities
+- Custom `PyTorch Dataset` (`CHDataset`) for multi-view echocardiographic data
+- 80/10/10 train/validation/test split
+- Early stopping with patience-based checkpointing
+- Per-epoch metrics: Dice, IoU, Accuracy (macro-averaged)
+- Contour-based overlay visualisation of predicted vs ground truth masks
+- Video and GIF generation of segmentation results on unseen echocardiographic sequences
 
 ---
 
@@ -60,58 +61,65 @@ The dataset is publicly available at: https://www.creatis.insa-lyon.fr/Challenge
 
 ## Architecture
 
-### Model: UNet++ with ResNet34 Encoder
+### Model: UNet with ResNet34 Encoder
 
 ```
-Input (1-channel grayscale, 256×256)
+Input (1-channel grayscale, 320×320)
         │
    ResNet34 Encoder (ImageNet pretrained)
         │
-   Dense Skip Connections (UNet++ nested blocks)
+   Skip Connections
         │
    Decoder with upsampling
         │
-Output (4-class segmentation map, 256×256)
+Output (4-class segmentation map, 320×320)
 ```
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Architecture | UNet++ | Dense skip connections improve gradient flow and fine-grained boundary detection vs standard UNet |
+| Architecture | UNet | Proven encoder-decoder with skip connections for medical image segmentation |
 | Encoder | ResNet34 | Strong pretrained features; good balance of depth and efficiency |
 | Pretrained weights | ImageNet | Transfer learning accelerates convergence on limited medical data |
 | Input channels | 1 | Greyscale echocardiographic images |
-| Output classes | 4 | Background + 3 cardiac structures |
+| Output classes | 4 | Background + LV Endocardium + LV Myocardium + Left Atrium |
 
-### Loss Function
+### Loss Function & Optimiser
 
-**CrossEntropyLoss** — appropriate for multiclass pixel-wise classification with class imbalance between background and anatomical structures.
-
-### Optimiser & Training
-
-| Hyperparameter | Value |
+| Setting | Value |
 |---|---|
-| Batch size | 16 |
-| Epochs | 20 (with early stopping) |
+| Loss | CrossEntropyLoss |
+| Optimiser | Adam |
+| Learning rate | 1e-4 |
+| Batch size | 32 |
+| Image size | 320 × 320 |
+| Epochs | 20 |
 | Early stopping patience | 5 epochs |
-| Cross-validation | 5-Fold (80/20 train/val split per fold) |
-| Image size | 256 × 256 |
+| Data split | 80% train / 10% val / 10% test |
 
 ---
 
 ## Results
 
-Metrics are computed per class across the test set (held-out fold) using the best checkpoint per fold.
+All metrics are macro-averaged across the 4 classes.
 
-| Class | Dice ↑ | IoU ↑ | Precision ↑ | Recall ↑ |
+### Training Progression
+
+| Epoch | Train Loss | Val Loss | Train Dice | Val Dice | Train IoU | Val IoU | Train Acc | Val Acc |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 0.6613 | 0.4030 | 0.7296 | 0.8879 | 0.5874 | 0.8039 | 0.7938 | 0.9083 |
+| 5 | 0.1190 | 0.1201 | 0.9425 | 0.9346 | 0.8931 | 0.8796 | 0.9442 | 0.9298 |
+| 10 | 0.0622 | 0.0820 | 0.9595 | 0.9442 | 0.9232 | 0.8960 | 0.9596 | 0.9380 |
+| 20 | 0.0339 | 0.0702 | **0.9738** | **0.9537** | **0.9493** | **0.9128** | **0.9736** | **0.9565** |
+
+### Final Evaluation
+
+| Split | Loss | Dice ↑ | IoU ↑ | Accuracy ↑ |
 |---|---|---|---|---|
-| Background | — | — | — | — |
-| LV Endocardium | *see run* | *see run* | *see run* | *see run* |
-| LV Myocardium | *see run* | *see run* | *see run* | *see run* |
-| Left Atrium | *see run* | *see run* | *see run* | *see run* |
+| Train | 0.0339 | 0.9738 | 0.9493 | 0.9736 |
+| Validation | 0.0702 | 0.9537 | 0.9128 | 0.9565 |
+| Test | 0.0777 | — | — | — |
 
-> Results depend on the training run. Populate this table after training by reading `metrics.csv` from Google Drive.
-
-Training curves and per-class confusion matrices are generated automatically at the end of the notebook.
+> The small gap between validation and test loss (0.0702 vs 0.0777) indicates no significant overfitting.
 
 ---
 
@@ -119,13 +127,13 @@ Training curves and per-class confusion matrices are generated automatically at 
 
 ```
 camus-segmentation/
-├── Assignment_1_CAMUS_Segmentation.ipynb   # Main notebook (Colab)
-├── requirements.txt                         # Python dependencies
-├── .gitignore                               # Excludes data, checkpoints, cache
+├── camus_segmentation.py    # Full pipeline: data loading, model, training, evaluation
+├── requirements.txt         # Python dependencies
+├── .gitignore               # Excludes data, checkpoints, cache
 └── README.md
 ```
 
-> Model checkpoints (`.pth`) and the dataset are excluded from version control due to size. See below for setup.
+> Model checkpoints (`.pth`) and the dataset are excluded from version control due to size.
 
 ---
 
@@ -142,16 +150,6 @@ cd camus-segmentation
 
 ```bash
 pip install -r requirements.txt
-```
-
-Or manually:
-
-```bash
-pip install torch torchvision
-pip install segmentation-models-pytorch
-pip install nibabel SimpleITK h5py
-pip install scikit-learn scikit-image
-pip install matplotlib seaborn pandas tqdm opencv-python Pillow
 ```
 
 ### 3. Download the dataset
@@ -172,7 +170,7 @@ ch_database/
 
 ### 4. Upload to Google Drive
 
-The notebook is designed to run on **Google Colab**. Upload `ch_database/` to your Drive at:
+The script is designed to run on **Google Colab**. Upload `ch_database/` to your Drive at:
 
 ```
 MyDrive/ch_database/
@@ -184,43 +182,46 @@ MyDrive/ch_database/
 
 ### Running on Google Colab
 
-1. Open the notebook in [Google Colab](https://colab.research.google.com/)
+1. Upload `camus_segmentation.py` to your Colab session or mount from Drive
 2. Mount your Google Drive when prompted
-3. Verify the dataset path in the second cell:
+3. Verify the dataset path:
    ```python
    data_path = "/content/drive/MyDrive/ch_database"
    ```
-4. Run all cells sequentially
+4. Run the script — training, evaluation, and visualisation execute sequentially
 
 ### Key outputs saved to Google Drive
 
 | File | Description |
 |---|---|
-| `best_model_fold_N.pth` | Best checkpoint per fold (lowest val loss) |
-| `checkpoint_epoch_N_fold_N.pth` | Periodic checkpoints every 10 epochs |
-| `metrics.csv` | Training and validation metrics per epoch |
-| `model_evaluated_on_test.pth` | Final model after test evaluation |
+| `best_model.pth` | Best checkpoint by validation loss |
+| `model_epoch_N.pth` | Periodic checkpoint every 5 epochs |
+| `final_model.pth` | Model weights after full training |
+| `tested_model.pth` | Model weights after test evaluation |
+| `New_Masks/` | Predicted masks for unseen echocardiographic frames |
+| `segmentation_video.mp4` | Video of segmentation on new sequences |
+| `segmentation_animation.gif` | GIF with colour-coded class overlays |
 
 ---
 
-## Known Issues & Limitations
+## Limitations
 
-- **Google Colab dependency:** Data loading is hard-coded to `/content/drive/MyDrive/`. Adapt paths for local execution.
-- **3D volumes:** Only the central slice is used from 3D NIfTI files. Temporal/volumetric modelling is not implemented.
-- **Data augmentation:** The current pipeline does not apply augmentation (rotation, flipping). Adding it would likely improve generalisation.
-- **Class label mapping:** Verify that your CAMUS masks use values `{0, 1, 2, 3}` with `np.unique(mask_data)` before training.
+- **Google Colab dependency:** Paths are hard-coded to `/content/drive/MyDrive/`. Adapt for local execution.
+- **Single slice per volume:** Only the first slice is used from 3D NIfTI files. Temporal or volumetric modelling is not implemented.
+- **No data augmentation:** Adding rotation, flipping, or elastic deformation would likely improve generalisation on edge cases.
+- **Video inference uses softmax argmax:** The multiclass output is converted to a single-channel mask for visualisation; per-class confidence maps are not exported.
 
 ---
 
 ## References
 
 - Leclerc, S. et al. (2019). *Deep Learning for Segmentation using an Open Large-Scale Dataset in 2D Echocardiography.* IEEE Transactions on Medical Imaging.
-- Zhou, Z. et al. (2018). *UNet++: A Nested U-Net Architecture for Medical Image Segmentation.* MICCAI.
+- Ronneberger, O. et al. (2015). *U-Net: Convolutional Networks for Biomedical Image Segmentation.* MICCAI.
 - [segmentation-models-pytorch](https://github.com/qubvel/segmentation_models.pytorch) — Iakubovskii, P.
 
 ---
 
 ## Author
 
-**Malcolm** — MSc Artificial Intelligence (Healthcare), University of [Your University]  
+**Malcolm** — MSc Artificial Intelligence (Healthcare), University of West London
 [LinkedIn](#) · [GitHub](#)
