@@ -943,11 +943,16 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 
-def test_model(model, test_loader, criterion, num_classes, model_load_path="/content/drive/MyDrive/final_model.pth", model_save_path="/content/drive/MyDrive/tested_model.pth"):
+def test_model(model, test_loader, criterion, num_classes, model_load_path="/content/drive/MyDrive/best_model.pth"):
+    """Evaluate a saved checkpoint on the held-out test set.
+
+    Uses best_model.pth by default: the checkpoint selected by validation loss.
+    """
     print("\n📂 Loading saved model for testing...")
 
-    # Load model
-    model.load_state_dict(torch.load(model_load_path))  # No need to specify map_location for CPU
+    # Load the weights onto whichever device is available (GPU or CPU)
+    model.load_state_dict(torch.load(model_load_path, map_location=device))
+    model.to(device)
     model.eval()
     print(f"✅ Model loaded from: {model_load_path}")
 
@@ -958,17 +963,20 @@ def test_model(model, test_loader, criterion, num_classes, model_load_path="/con
 
     with torch.no_grad():
         for images, masks in tqdm(test_loader, desc="🔍 Testing"):
-            # No device shifting, everything remains on the CPU
-            outputs = model(images)  # Forward pass
-            loss = criterion(outputs, masks)  # Calculate loss
-            running_loss += loss.item()  # Accumulate loss
+            # Bug fixed: inputs must be on the same device as the model
+            images = images.to(device)
+            masks = masks.to(device)
 
-            preds = torch.argmax(outputs, dim=1)  # Get predictions (max along the class dimension)
+            outputs = model(images)
+            loss = criterion(outputs, masks)
+            running_loss += loss.item()
 
-            all_preds.append(preds)  # Keep predictions on CPU
-            all_targets.append(masks)  # Keep targets on CPU
+            preds = torch.argmax(outputs, dim=1)
 
-    # Concatenate all predictions and targets across batches
+            # Keep predictions on the CPU so GPU memory does not grow with the test set
+            all_preds.append(preds.cpu())
+            all_targets.append(masks.cpu())
+
     all_preds = torch.cat(all_preds, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
 
@@ -979,11 +987,6 @@ def test_model(model, test_loader, criterion, num_classes, model_load_path="/con
     precision, recall, f1 = calculate_precision_recall_f1(all_preds, all_targets, num_classes)
     cm = calculate_confusion_matrix(all_preds, all_targets, num_classes)
 
-    # Save the tested model to the specified path
-    torch.save(model.state_dict(), model_save_path)  # Save the model after testing
-    print(f"\n💾 Tested model saved to: {model_save_path}")
-
-    # Print and plot results
     results = {
         "test_loss": running_loss / len(test_loader),
         "iou": macro_average(iou),
@@ -991,7 +994,9 @@ def test_model(model, test_loader, criterion, num_classes, model_load_path="/con
         "accuracy": macro_average(accuracy),
         "precision": np.mean(precision),
         "recall": np.mean(recall),
-        "f1_score": np.mean(f1)
+        "f1_score": np.mean(f1),
+        "dice_per_class": dice,
+        "iou_per_class": iou,
     }
 
     # 📊 Display the test metrics
@@ -1003,6 +1008,9 @@ def test_model(model, test_loader, criterion, num_classes, model_load_path="/con
     print(f"Precision: {results['precision']:.4f}")
     print(f"Recall: {results['recall']:.4f}")
     print(f"F1 Score: {results['f1_score']:.4f}")
+    class_names = ["Background", "LV Endocardium", "LV Myocardium", "Left Atrium"]
+    for name, d, j in zip(class_names, dice, iou):
+        print(f"  {name:<15} Dice {d:.4f} | IoU {j:.4f}")
 
     # 📌 Confusion Matrix visualization
     plt.figure(figsize=(6, 5))
