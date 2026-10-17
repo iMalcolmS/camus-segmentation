@@ -1,0 +1,20 @@
+# Data (not redistributable)
+ch_database/
+*.nii
+*.nii.gz
+*.h5
+
+# Model checkpoints and generated media
+*.pth
+*.pt
+New_Masks/
+*.mp4
+*.gif
+
+# Python / editors
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+*.save
+.DS_Store
